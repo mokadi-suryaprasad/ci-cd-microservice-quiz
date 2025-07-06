@@ -23,16 +23,13 @@ spec:
     spec:
       containers:
         - name: api
-          image: suryaprasad9773/backend:6aec1c1972784485b8b02913e40143c8f7069051
+          image: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:8
           imagePullPolicy: IfNotPresent 
-          env:
-            - name: MONGO_CONN_STR
-              value: mongodb://mongodb-svc:27017/quiz_database?directConnection=true
-            - name: SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: mongodb-secret
-                  key: mongo-secret-key     
+          envFrom:
+            - configMapRef:
+                name: mysql-config
+            - secretRef:
+                name: mysql-secret
           ports:
             - containerPort: 8080
           livenessProbe:
@@ -48,3 +45,19 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             successThreshold: 1
+
+        - name: cloud-sql-proxy
+          image: gcr.io/cloudsql-docker/gce-proxy:1.33.0
+          command:
+            - "/cloud_sql_proxy"
+            - "-instances=heroic-gamma-465105-c8:us-central1:quizdb=tcp:3306"
+            - "-credential_file=/secrets/cloudsql/credentials.json"
+          volumeMounts:
+            - name: cloudsql-instance-credentials
+              mountPath: /secrets/cloudsql
+              readOnly: true
+
+      volumes:
+        - name: cloudsql-instance-credentials
+          secret:
+            secretName: cloudsql-instance-credentials
