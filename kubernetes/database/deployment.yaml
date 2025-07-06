@@ -1,44 +1,63 @@
 apiVersion: apps/v1
 kind: Deployment
-metadata: 
+metadata:
+  name: api
   namespace: quiz-app
-  name: mongodb
-spec: 
+  labels:
+    role: api
+    env: demo
+spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 25%
   selector:
     matchLabels:
-      app: mongodb
+      role: api
   template:
     metadata:
-      labels: 
-        app: mongodb
-    spec: 
+      labels:
+        role: api
+    spec:
       containers:
-      - name: mongo-db
-        image: mongo:4.4.6
-        command:
-          - "numactl"
-          - "--interleave=all"
-          - "mongod"
-          - "--wiredTigerCacheSizeGB=0.1"
-          - "--bind_ip=0.0.0.0"
-        ports:
-        - containerPort: 27017
-        env: 
-          - name: MONGO_INITDB_ROOT_USERNAME
-            valueFrom:
-              secretKeyRef:
-                name: mongodb-secret
-                key: mongo-username
-          - name: MONGO_INITDB_ROOT_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: mongodb-secret
-                key: mongo-password
-        volumeMounts:
-          - name: mongo-volume
-            mountPath: /data/db
-      volumes: 
-      - name: mongo-volume
-        persistentVolumeClaim:
-          claimName: mongo-volume-claim
+        - name: api
+          image: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/database:4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: mysql-config
+            - secretRef:
+                name: mysql-secret
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+
+        - name: cloud-sql-proxy
+          image: gcr.io/cloudsql-docker/gce-proxy:1.33.0
+          command:
+            - "/cloud_sql_proxy"
+            - "-instances=heroic-gamma-465105-c8:us-central1:quizdb=tcp:3306"
+            - "-credential_file=/secrets/cloudsql/credentials.json"
+          volumeMounts:
+            - name: cloudsql-instance-credentials
+              mountPath: /secrets/cloudsql
+              readOnly: true
+
+      volumes:
+        - name: cloudsql-instance-credentials
+          secret:
+            secretName: cloudsql-instance-credentials
