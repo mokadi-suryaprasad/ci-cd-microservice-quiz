@@ -86,7 +86,6 @@ jobs:
 
       - name: 12. Push Docker Image to ECR
         run: |
-          docker push $ECR_URI:latest
           docker push $ECR_URI:${{ env.BUILD_TAG }}
 
       - name: 13. Run Backend & Health Check
