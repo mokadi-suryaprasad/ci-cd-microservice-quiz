@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-init-job
+  namespace: quiz-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: mongo-init
+          image: suryaprasad9773/database:6aec1c1972784485b8b02913e40143c8f7069051
+          env:
+            - name: MONGO_HOST
+              value: "mongodb-svc"
+            - name: MONGO_PORT
+              value: "27017"
+            - name: MONGO_DB
+              value: "quiz_database"
+      restartPolicy: Never
+  backoffLimit: 4
