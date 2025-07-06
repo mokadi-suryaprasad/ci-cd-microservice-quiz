@@ -8,6 +8,10 @@ on:
       - 'backend/**'
       - '.github/workflows/backend-ci.yaml'
 
+permissions:
+  contents: read
+  security-events: write  # Needed for CodeQL results upload
+
 env:
   BUILD_TAG: ${{ github.run_number }}
 
@@ -19,6 +23,7 @@ jobs:
       AWS_REGION: ap-south-1
       ECR_REPO: dev/backend
       S3_BUCKET: devvbackend
+      ECR_URI: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend
 
     steps:
       - name: 1. Checkout Code
@@ -38,7 +43,6 @@ jobs:
 
       - name: 4. Run Unit Tests (Skipped)
         run: echo "🟡 No test cases running"
-
 
       - name: 5. CodeQL Static Analysis Init
         uses: github/codeql-action/init@v2
@@ -62,27 +66,28 @@ jobs:
 
       - name: 9. Authenticate Docker to AWS ECR
         run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin 023703779855.dkr.ecr.ap-south-1.amazonaws.com
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin 023703779855.dkr.ecr.ap-south-1.amazonaws.com
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: 10. Tag Docker Image
         run: |
-          docker tag dev/backend:latest 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:latest
-          docker tag dev/backend:latest 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:${{ env.BUILD_TAG }}
+          docker tag dev/backend:latest $ECR_URI:latest
+          docker tag dev/backend:latest $ECR_URI:${{ env.BUILD_TAG }}
 
       - name: 11. Trivy Image Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:${{ env.BUILD_TAG }}
+          image-ref: ${{ env.ECR_URI }}:${{ env.BUILD_TAG }}
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
 
       - name: 12. Push Docker Image to ECR
         run: |
-          docker push 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:latest
-          docker push 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:${{ env.BUILD_TAG }}
+          docker push $ECR_URI:latest
+          docker push $ECR_URI:${{ env.BUILD_TAG }}
 
       - name: 13. Run Backend App & Health Check
         run: |
