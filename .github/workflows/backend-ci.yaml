@@ -1,0 +1,128 @@
+name: Backend AWS CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  BUILD_TAG: ${{ github.run_number }}
+
+jobs:
+  backend-ci:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ap-south-1
+      ECR_REPO: dev/backend
+      S3_BUCKET: devvbackend
+      ACCOUNT_ID: 023703779855
+      ECR_URI: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend
+
+    steps:
+      - name: 1. Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Python & Install Dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 3. Install Python Requirements
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+        shell: bash
+
+      - name: 4. Run Unit Tests
+        run: |
+          source venv/bin/activate
+          pytest backend/test_app.py
+        shell: bash
+
+      - name: 5. CodeQL Static Analysis Init
+        uses: github/codeql-action/init@v2
+        with:
+          languages: python
+
+      - name: 6. CodeQL Analyze
+        uses: github/codeql-action/analyze@v2
+
+      - name: 7. Zip & Upload Artifact to S3
+        run: |
+          zip -r backend.zip backend
+          DATE=$(date +%F)
+          aws s3 cp backend.zip s3://$S3_BUCKET/backend/$DATE/build-${{ env.BUILD_TAG }}.zip
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: 8. Docker Build
+        run: docker build -t dev/backend backend/
+
+      - name: 9. Authenticate Docker to AWS ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin $ECR_URI
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: 10. Tag Docker Image
+        run: |
+          docker tag dev/backend:latest $ECR_URI:latest
+          docker tag dev/backend:latest $ECR_URI:${{ env.BUILD_TAG }}
+
+      - name: 11. Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_URI }}:${{ env.BUILD_TAG }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: 12. Push Docker Image to ECR
+        run: |
+          docker push $ECR_URI:latest
+          docker push $ECR_URI:${{ env.BUILD_TAG }}
+
+      - name: 13. Run Backend App & Health Check
+        run: |
+          pip install -r backend/requirements.txt
+          cd backend
+          nohup python app.py > server.log 2>&1 &
+          sleep 15
+          curl -I http://localhost:5000 || echo "App not reachable"
+
+      - name: 🔍 Run OWASP ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.12.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
+          target: 'http://host.docker.internal:5000'
+          cmd_options: '-a -r zap-report.html -J zap-report.json'
+
+      - name: 📋 Upload ZAP DAST Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-dast-report
+          path: |
+            zap-report.html
+            zap-report.json
+
+      - name: 14. Update K8s YAML & Git Push
+        run: |
+          sed -i "s|image: .*|image: ${ECR_URI}:${{ env.BUILD_TAG }}|" backend/deployment.yaml
+
+          git config --global user.email "mspr9773@gmail.com"
+          git config --global user.name "M Surya Prasad"
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}
+
+          git add backend/deployment.yaml
+          git diff --cached --quiet && echo "🟡 No changes to commit" || git commit -m "Update backend image to ${{ env.BUILD_TAG }}"
+          git push
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
