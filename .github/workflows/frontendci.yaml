@@ -48,7 +48,6 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           ECR_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
-          docker tag dev/frontend:latest $ECR_URI:latest
           docker tag dev/frontend:latest $ECR_URI:${{ env.BUILD_TAG }}
           echo "ECR_URI=$ECR_URI" >> $GITHUB_ENV
 
@@ -86,7 +85,7 @@ jobs:
       - name: 🔑 Set up SSH for Git Push
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.ACTIONS_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          printf "%s" "${{ secrets.ACTIONS_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
