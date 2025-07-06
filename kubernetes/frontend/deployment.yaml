@@ -22,7 +22,21 @@ spec:
         role: frontend
     spec:
       containers:
-      - name: frontend
-        image: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/frontend:13
-        ports:
-        - containerPort: 80
+        - name: frontend
+          image: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/frontend:13
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
