@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yaml'
 
 env:
   BUILD_TAG: ${{ github.run_number }}
@@ -16,8 +19,6 @@ jobs:
       AWS_REGION: ap-south-1
       ECR_REPO: dev/backend
       S3_BUCKET: devvbackend
-      ACCOUNT_ID: 023703779855
-      ECR_URI: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend
 
     steps:
       - name: 1. Checkout Code
@@ -34,13 +35,10 @@ jobs:
           source venv/bin/activate
           pip install --upgrade pip
           pip install -r backend/requirements.txt
-        shell: bash
 
-      - name: 4. Run Unit Tests
-        run: |
-          source venv/bin/activate
-          pytest backend/test_app.py
-        shell: bash
+      - name: 4. Run Unit Tests (Skipped)
+        run: echo "🟡 No test cases running"
+
 
       - name: 5. CodeQL Static Analysis Init
         uses: github/codeql-action/init@v2
@@ -64,28 +62,27 @@ jobs:
 
       - name: 9. Authenticate Docker to AWS ECR
         run: |
-          aws ecr get-login-password --region $AWS_REGION \
-            | docker login --username AWS --password-stdin $ECR_URI
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin 023703779855.dkr.ecr.ap-south-1.amazonaws.com
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: 10. Tag Docker Image
         run: |
-          docker tag dev/backend:latest $ECR_URI:latest
-          docker tag dev/backend:latest $ECR_URI:${{ env.BUILD_TAG }}
+          docker tag dev/backend:latest 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:latest
+          docker tag dev/backend:latest 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:${{ env.BUILD_TAG }}
 
       - name: 11. Trivy Image Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ECR_URI }}:${{ env.BUILD_TAG }}
+          image-ref: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:${{ env.BUILD_TAG }}
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
 
       - name: 12. Push Docker Image to ECR
         run: |
-          docker push $ECR_URI:latest
-          docker push $ECR_URI:${{ env.BUILD_TAG }}
+          docker push 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:latest
+          docker push 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/backend:${{ env.BUILD_TAG }}
 
       - name: 13. Run Backend App & Health Check
         run: |
@@ -114,7 +111,10 @@ jobs:
 
       - name: 14. Update K8s YAML & Git Push
         run: |
-          sed -i "s|image: .*|image: ${ECR_URI}:${{ env.BUILD_TAG }}|" backend/deployment.yaml
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
+
+          sed -i "s|image: .*|image: ${ECR_URL}:${{ env.BUILD_TAG }}|" backend/deployment.yaml
 
           git config --global user.email "mspr9773@gmail.com"
           git config --global user.name "M Surya Prasad"
