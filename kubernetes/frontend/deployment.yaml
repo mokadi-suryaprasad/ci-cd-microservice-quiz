@@ -23,6 +23,6 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: suryaprasad9773/frontend:6aec1c1972784485b8b02913e40143c8f7069051
+        image: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/frontend:13
         ports:
         - containerPort: 80
