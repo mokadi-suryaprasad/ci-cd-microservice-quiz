@@ -18,80 +18,78 @@ jobs:
       S3_BUCKET: devvfrontend
 
     steps:
-    - name: 1. Checkout Code
-      uses: actions/checkout@v4
+      - name: 1. Checkout Code
+        uses: actions/checkout@v4
 
-    - name: 2. Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: 2. Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: 3. Zip Frontend Files
-      run: |
-        zip -r frontend.zip static templates nginx.conf Dockerfile
+      - name: 3. Zip Frontend Files
+        run: zip -r frontend.zip static templates nginx.conf Dockerfile
 
-    - name: 4. Upload Artifact to S3
-      run: |
-        DATE=$(date +%F)
-        aws s3 cp frontend.zip s3://$S3_BUCKET/frontend/$DATE/build-${{ env.BUILD_TAG }}.zip
+      - name: 4. Upload Artifact to S3
+        run: |
+          DATE=$(date +%F)
+          aws s3 cp frontend.zip s3://$S3_BUCKET/frontend/$DATE/build-${{ env.BUILD_TAG }}.zip
 
-    - name: 5. Build Docker Image
-      run: |
-        docker build -t dev/frontend .
+      - name: 5. Build Docker Image
+        run: docker build -t dev/frontend .
 
-    - name: 6. Tag Docker Image for ECR
-      run: |
-        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-        ECR_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
-        docker tag dev/frontend:latest $ECR_URI:latest
-        docker tag dev/frontend:latest $ECR_URI:${{ env.BUILD_TAG }}
-        echo "ECR_URI=$ECR_URI" >> $GITHUB_ENV
+      - name: 6. Tag Docker Image for ECR
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
+          docker tag dev/frontend:latest $ECR_URI:latest
+          docker tag dev/frontend:latest $ECR_URI:${{ env.BUILD_TAG }}
+          echo "ECR_URI=$ECR_URI" >> $GITHUB_ENV
 
-    - name: 7. Authenticate Docker to ECR
-      run: |
-        aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URI
+      - name: 7. Authenticate Docker to ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_URI
 
-    - name: 8. Push Docker Image to ECR
-      run: |
-        docker push $ECR_URI:latest
-        docker push $ECR_URI:${{ env.BUILD_TAG }}
+      - name: 8. Push Docker Image to ECR
+        run: |
+          docker push $ECR_URI:latest
+          docker push $ECR_URI:${{ env.BUILD_TAG }}
 
-    - name: 9. Start NGINX Frontend Container in Background
-      run: |
-        docker run -d -p 8080:80 --name frontend-test $ECR_URI:${{ env.BUILD_TAG }}
-        sleep 10
-        curl -I http://localhost:8080 || echo "NGINX app not reachable"
+      - name: 9. Start NGINX Frontend Container in Background
+        run: |
+          docker run -d -p 8080:80 --name frontend-test $ECR_URI:${{ env.BUILD_TAG }}
+          sleep 10
+          curl -I http://localhost:8080 || echo "NGINX app not reachable"
 
-    - name: 🔍 Run OWASP ZAP Full Scan
-      uses: zaproxy/action-full-scan@v0.12.0
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
-        target: 'http://host.docker.internal:8080'
-        cmd_options: '-a -r zap-report.html -J zap-report.json'
+      - name: 🔍 Run OWASP ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.12.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
+          target: 'http://host.docker.internal:8080'
+          cmd_options: '-a -r zap-report.html -J zap-report.json'
 
-    - name: 📋 Upload ZAP DAST Report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: zap-dast-report
-        path: |
-          zap-report.html
-          zap-report.json
+      - name: 📋 Upload ZAP DAST Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-dast-report
+          path: |
+            zap-report.html
+            zap-report.json
 
-    - name: 10. Update K8s Deployment YAML & Git Push
-      run: |
-        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-        ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
+      - name: 10. Update K8s Deployment YAML & Git Push
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
 
-        sed -i "s|image: .*|image: ${ECR_URL}:${{ env.BUILD_TAG }}|" kubernetes/frontend/deployment.yaml
+          sed -i "s|image: .*|image: ${ECR_URL}:${{ env.BUILD_TAG }}|" kubernetes/frontend/deployment.yaml
 
-        git config --global user.email "msuryaprasad11@gmail.com"
-        git config --global user.name "M Surya Prasad"
-        git remote set-url origin https://x-access-token:${{ secrets.GH_PATT }}@github.com/${{ github.repository }}
+          git config --global user.email "mspr9773@gmail.com"
+          git config --global user.name "M Surya Prasad"
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}
 
-        git add kubernetes/frontend/deployment.yaml
-        git diff --cached --quiet && echo "🟡 No changes to commit" || git commit -m "Update frontend image to ${{ env.BUILD_TAG }}"
-        git push
+          git add kubernetes/frontend/deployment.yaml
+          git diff --cached --quiet && echo "🟡 No changes to commit" || git commit -m "Update frontend image to ${{ env.BUILD_TAG }}"
+          git push
