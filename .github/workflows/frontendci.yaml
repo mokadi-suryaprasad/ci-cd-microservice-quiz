@@ -58,7 +58,6 @@ jobs:
 
       - name: 8. Push Docker Image to ECR
         run: |
-          docker push $ECR_URI:latest
           docker push $ECR_URI:${{ env.BUILD_TAG }}
 
       - name: 9. Start NGINX Frontend Container in Background
