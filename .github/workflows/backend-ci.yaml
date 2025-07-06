@@ -62,7 +62,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: 8. Docker Build
-        run: docker build -t dev/backend backend/
+        run: docker build -t dev/backend -f backend/Dockerfile .
 
       - name: 9. Authenticate Docker to AWS ECR
         run: |
