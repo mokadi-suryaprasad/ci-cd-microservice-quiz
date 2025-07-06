@@ -1,0 +1,136 @@
+name: Database AWS CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'database/**'
+      - '.github/workflows/database-ci.yaml'
+
+permissions:
+  contents: read
+  security-events: write  # for CodeQL
+
+env:
+  BUILD_TAG: ${{ github.run_number }}
+
+jobs:
+  database-ci:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ap-south-1
+      ECR_REPO: dev/database
+      S3_BUCKET: devvdatabase
+      ECR_URI: 023703779855.dkr.ecr.ap-south-1.amazonaws.com/dev/database
+
+    steps:
+      - name: 1️⃣ Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 2️⃣ Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 3️⃣ Install Python Dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r database/requirements.txt
+
+      - name: 4️⃣ Run Unit Tests
+        run: |
+          source venv/bin/activate
+          pip install pytest
+          pytest database/test_mysql.py
+
+      - name: 5️⃣ CodeQL Init
+        uses: github/codeql-action/init@v2
+        with:
+          languages: python
+
+      - name: 6️⃣ CodeQL Analyze
+        uses: github/codeql-action/analyze@v2
+
+      - name: 7️⃣ Zip & Upload to S3
+        run: |
+          zip -r database.zip database
+          DATE=$(date +%F)
+          aws s3 cp database.zip s3://$S3_BUCKET/database/$DATE/build-${{ env.BUILD_TAG }}.zip
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: 8️⃣ Docker Build
+        run: docker build -t dev/database -f database/Dockerfile .
+
+      - name: 9️⃣ Authenticate to AWS ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin 023703779855.dkr.ecr.ap-south-1.amazonaws.com
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: 🔟 Tag Docker Image
+        run: |
+          docker tag dev/database:latest $ECR_URI:latest
+          docker tag dev/database:latest $ECR_URI:${{ env.BUILD_TAG }}
+
+      - name: 1️⃣1️⃣ Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ECR_URI }}:${{ env.BUILD_TAG }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: 1️⃣2️⃣ Push to AWS ECR
+        run: |
+          docker push $ECR_URI:latest
+          docker push $ECR_URI:${{ env.BUILD_TAG }}
+
+      - name: 1️⃣3️⃣ Run App & Health Check
+        run: |
+          pip install -r database/requirements.txt
+          cd database
+          nohup python mysql.py > server.log 2>&1 &
+          sleep 15
+          curl -I http://localhost:5000 || echo "App not reachable"
+
+      - name: 🔍 Run OWASP ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.12.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          docker_name: 'ghcr.io/zaproxy/zaproxy:stable'
+          target: 'http://host.docker.internal:5000'
+          cmd_options: '-a -r zap-report.html -J zap-report.json'
+
+      - name: 📋 Upload ZAP DAST Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-dast-report
+          path: |
+            zap-report.html
+            zap-report.json
+
+      - name: 1️⃣4️⃣ Update K8s YAML & Git Push
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URL=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO
+
+          sed -i "s|image: .*|image: ${ECR_URL}:${{ env.BUILD_TAG }}|" kubernetes/database/deployment.yaml
+
+          git config --global user.email "mspr9773@gmail.com"
+          git config --global user.name "M Surya Prasad"
+          git remote set-url origin https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}
+
+          git add kubernetes/database/deployment.yaml
+          git diff --cached --quiet && echo "🟡 No changes to commit" || git commit -m "Update database image to ${{ env.BUILD_TAG }}"
+          git push
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
